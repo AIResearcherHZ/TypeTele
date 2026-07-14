@@ -65,7 +65,7 @@ class KeyReader:
         return ch.lower() if ch else None
 
 
-FINGER_NAMES = ("无名指", "中指", "食指", "拇指")
+FINGER_NAMES = ("拇指", "食指", "中指", "无名指", "小指")
 JOINT_COLS = ("关节1", "关节2", "关节3", "关节4")
 
 

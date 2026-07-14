@@ -1,47 +1,45 @@
 import os
 import time
 
-import numpy as np
-
-from leap_hand_utils.leap_node import create_leap_node
+from hand2_utils.hand_node import create_hand_node
 from ui import KeyReader, command_panel, console, pose_table
 
-HAND_CATEGORY = "leap"
+HAND_CATEGORY = "hand2"
 
 
-class LeapCreateType:
+class Hand2CreateType:
     def __init__(self, cfg):
         self.cfg = cfg
-        self.leap_node = None
+        self.hand_node = None
         self.open_pos = None
         self.close_pos = None
-        self.init_leap()
+        self.open_eef = None
+        self.close_eef = None
+        self.init_hand()
 
-    def init_leap(self):
-        console.print("[dim]正在初始化 LEAP 灵巧手...[/]")
-        self.leap_node = create_leap_node(self.cfg["leap_cfg"])
-        self.leap_node.enable_free_drag_mode()
-        console.print("[green]LEAP 灵巧手已进入自由拖拽模式[/]")
-
-    def _get_current_leap_pos(self):
-        current_pos = self.leap_node.read_pos()
-        joints = current_pos - 3.14159
-        reorder_index = np.array([9, 8, 10, 11, 5, 4, 6, 7, 1, 0, 2, 3, 12, 13, 14, 15])
-        inverse_index = np.argsort(reorder_index)
-        reordered = np.array(joints)[inverse_index]
-        return reordered
+    def init_hand(self):
+        console.print("[dim]正在初始化 hand2 灵巧手...[/]")
+        self.hand_node = create_hand_node(self.cfg["hand_cfg"])
+        self.hand_node.enable_free_drag_mode()
+        console.print("[green]hand2 灵巧手已进入自由拖拽模式[/]")
 
     def record_next(self):
-        pos = self._get_current_leap_pos()
+        pos = self.hand_node.read_pos()
+        eef = self.hand_node.read_eef()
+        eef_str = " ".join(f"{v:+.3f}" for v in eef)
         if self.open_pos is None:
             self.open_pos = pos
+            self.open_eef = eef
             console.print(pose_table("1/2 已记录「张开」姿态 (rad)", pos))
+            console.print(f"[dim]EEF (基座位姿 x y z qw qx qy qz): {eef_str}[/]")
             console.print("[bold]摆好「闭合」姿势后再按一次空格[/]")
         elif self.close_pos is None:
             self.close_pos = pos
+            self.close_eef = eef
             console.print(
                 pose_table("2/2 已记录「闭合」姿态 (rad)", pos, style="magenta")
             )
+            console.print(f"[dim]EEF (基座位姿 x y z qw qx qy qz): {eef_str}[/]")
             console.print("[bold]按回车保存，或按 r 重录[/]")
         else:
             console.print("[yellow]两个姿态都已录好，按回车保存，或按 r 重录[/]")
@@ -81,21 +79,27 @@ class LeapCreateType:
         with open(save_path, "w") as f:
             f.write(" ".join(map(str, self.open_pos)) + "\n")
             f.write(" ".join(map(str, self.close_pos)) + "\n")
+            f.write(" ".join(map(str, self.open_eef)) + "\n")
+            f.write(" ".join(map(str, self.close_eef)) + "\n")
 
-        console.print(f"[green]手势已保存到: {save_path}[/]")
+        console.print(f"[green]手势已保存到: {save_path}[/] (含 EEF 基座位姿)")
         self.open_pos = None
         self.close_pos = None
+        self.open_eef = None
+        self.close_eef = None
         console.print("[bold]可以继续录下一个手势：摆好「张开」姿势按空格[/]")
 
     def reset_positions(self):
         self.open_pos = None
         self.close_pos = None
+        self.open_eef = None
+        self.close_eef = None
         console.print("[yellow]已清空，重新摆好「张开」姿势按空格[/]")
 
     def print_help(self):
         console.print(
             command_panel(
-                "LEAP 手势录制工具",
+                "hand2 手势录制工具",
                 [
                     ("空格", "记录当前姿态 (第 1 次=张开，第 2 次=闭合)"),
                     ("回车", "保存手势 (只在起名字时需要打字)"),
@@ -136,18 +140,18 @@ class LeapCreateType:
 
     def cleanup(self):
         try:
-            if self.leap_node and self.leap_node.free_drag_active:
-                self.leap_node.disable_free_drag_mode()
-            if self.leap_node:
-                self.leap_node.close()
+            if self.hand_node and self.hand_node.free_drag_active:
+                self.hand_node.disable_free_drag_mode()
+            if self.hand_node:
+                self.hand_node.close()
         except Exception as e:
             console.print(f"[red]清理灵巧手资源失败: {e}[/]")
 
 
 def main():
-    cfg = {"leap_cfg": {"sim": True, "curr_lim": 120, "kP": 150, "kI": 0, "kD": 50}}
+    cfg = {"hand_cfg": {"sim": True}}
 
-    recorder = LeapCreateType(cfg)
+    recorder = Hand2CreateType(cfg)
     recorder.run()
 
 

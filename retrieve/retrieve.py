@@ -67,9 +67,7 @@ class Retrieve:
             )
             type_library_path = base_type_library_path
 
-        json_path = os.path.join(
-            type_library_path, f"{self.category}", "_type_info.json"
-        )
+        json_path = os.path.join(type_library_path, "_type_info.json")
 
         loaded_from_json = False
         if os.path.exists(json_path):

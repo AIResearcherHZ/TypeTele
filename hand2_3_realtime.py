@@ -1,7 +1,7 @@
 from asr.tencent_asr import AsrServer
 from hand_detect.detectFinger import FingerDetector
 from retrieve.retrieve import Retrieve
-from leap_hand_utils.leap_node import create_leap_node
+from hand2_utils.hand_node import NUM_JOINTS, create_hand_node
 
 import os
 import time
@@ -11,8 +11,13 @@ import cv2
 from asr.typing_asr import KeyboardAsrServer
 from ui import console, kv_panel
 
-_REORDER_INDEX = np.array([9, 8, 10, 11, 5, 4, 6, 7, 1, 0, 2, 3, 12, 13, 14, 15])
-_INVERSE_INDEX = np.argsort(_REORDER_INDEX)
+FINGER_MASKS = {
+    "thumb": np.array([1] * 4 + [0] * 16),
+    "index": np.array([0] * 4 + [1] * 4 + [0] * 12),
+    "middle": np.array([0] * 8 + [1] * 4 + [0] * 8),
+    "ring": np.array([0] * 12 + [1] * 4 + [0] * 4),
+    "pinky": np.array([0] * 16 + [1] * 4),
+}
 
 
 class RealTimeRunner:
@@ -21,7 +26,9 @@ class RealTimeRunner:
 
         self.category = cfg["type"]["category"]
         self.curr_type = cfg["type"]["type_name"]
-        self.open_pos, self.close_pos = self.load_type(self.curr_type)
+        self.open_pos, self.close_pos, self.open_eef, self.close_eef = self.load_type(
+            self.curr_type
+        )
 
         self.asr_type = cfg["asr"].get("type", "typing")
         if self.asr_type == "tencent":
@@ -37,19 +44,14 @@ class RealTimeRunner:
             base_url=cfg["retriever"]["base_url"],
             category=self.category,
         )
-        self.leap_node = create_leap_node(self.cfg["leap_cfg"])
+        self.hand_node = create_hand_node(self.cfg["hand_cfg"])
+        self.hand_node.set_eef(self.open_eef)
 
         console.print(
             kv_panel(
-                "LEAP 实时遥操作",
+                "hand2 实时遥操作",
                 [
-                    (
-                        "灵巧手后端",
-                        "[bold]仿真 (MuJoCo)[/]"
-                        if cfg["leap_cfg"].get("sim")
-                        else "[bold]真实硬件[/]",
-                        "",
-                    ),
+                    ("灵巧手后端", "[bold]仿真 (MuJoCo)[/]", "assets/hand2/right.xml"),
                     ("初始手势", self.curr_type, f"类别 {self.category}"),
                     (
                         "指令输入",
@@ -77,27 +79,28 @@ class RealTimeRunner:
         self.asr.stop()
         self.finger_detector.stop()
         self.retriever.stop()
-        self.leap_node.close()
+        self.hand_node.close()
         cv2.destroyAllWindows()
 
     def change_type(self, new_type: str):
         console.print(f"[cyan]提示:[/] 切换抓取手势: {self.curr_type} -> {new_type}")
         self.curr_type = new_type
-        self.open_pos, self.close_pos = self.load_type(self.curr_type)
+        self.open_pos, self.close_pos, self.open_eef, self.close_eef = self.load_type(
+            self.curr_type
+        )
+        self.hand_node.set_eef(self.open_eef)
+
+    def get_eef(self):
+        return self.hand_node.read_eef()
 
     def load_type(self, type_name: str):
-        def parse_line(line: str):
+        def parse_line(line: str, expected: int):
             line = line.strip().strip("[]")
             parts = [p for p in line.replace(",", " ").split() if p]
             vals = [float(p) for p in parts]
-            if len(vals) != 16:
+            if len(vals) != expected:
                 raise ValueError(f"Invalid line length for {type_name}: {len(vals)}")
             return np.array(vals, dtype=float)
-
-        def _decode_saved(vec: np.ndarray) -> np.ndarray:
-            joints = np.zeros(16, dtype=float)
-            joints[_INVERSE_INDEX] = vec
-            return joints + 3.14159
 
         current_dir = os.path.dirname(os.path.abspath(__file__))
         type_file = os.path.join(
@@ -108,10 +111,12 @@ class RealTimeRunner:
             raise FileNotFoundError(f"Type file not found: {type_file}")
 
         with open(type_file, "r", encoding="utf-8") as f:
-            open_abs = _decode_saved(parse_line(f.readline()))
-            close_abs = _decode_saved(parse_line(f.readline()))
+            open_pos = parse_line(f.readline(), NUM_JOINTS)
+            close_pos = parse_line(f.readline(), NUM_JOINTS)
+            open_eef = parse_line(f.readline(), 7)
+            close_eef = parse_line(f.readline(), 7)
 
-        return open_abs, close_abs
+        return open_pos, close_pos, open_eef, close_eef
 
     def main_loop(self):
         try:
@@ -137,35 +142,14 @@ class RealTimeRunner:
                 if result:
                     ratio, bgr = result
 
-                    thumb_mask = np.array([0] * 12 + [1] * 4)
-                    index_mask = np.array([1] * 4 + [0] * 12)
-                    middle_mask = np.array([0] * 4 + [1] * 4 + [0] * 8)
-                    ring_mask = np.array([0] * 8 + [1] * 4 + [0] * 4)
+                    type_pos = np.zeros(NUM_JOINTS)
+                    for finger, mask in FINGER_MASKS.items():
+                        r = ratio[finger]
+                        type_pos += (
+                            self.open_pos * (1 - r) + self.close_pos * r
+                        ) * mask
 
-                    type_pos = (
-                        (
-                            self.open_pos * (1 - ratio["thumb"])
-                            + self.close_pos * ratio["thumb"]
-                        )
-                        * thumb_mask
-                        + (
-                            self.open_pos * (1 - ratio["index"])
-                            + self.close_pos * ratio["index"]
-                        )
-                        * index_mask
-                        + (
-                            self.open_pos * (1 - ratio["middle"])
-                            + self.close_pos * ratio["middle"]
-                        )
-                        * middle_mask
-                        + (
-                            self.open_pos * (1 - ratio["ring"])
-                            + self.close_pos * ratio["ring"]
-                        )
-                        * ring_mask
-                    )
-
-                    self.leap_node.set_leap(type_pos)
+                    self.hand_node.set_pos(type_pos)
 
                     if bgr is not None:
                         cv2.imshow("Hand Detection", bgr)
@@ -180,7 +164,7 @@ class RealTimeRunner:
             console.print("[green]已关闭。[/]")
 
 
-def run_leap():
+def run_hand2():
     cfg = {
         "asr": {
             "type": "typing",
@@ -205,7 +189,7 @@ def run_leap():
         "retriever": {
             "api_key": "your_api_key",
             "base_url": "https://api.deepseek.com",
-            "category": "leap",
+            "category": "hand2",
         },
         "detector": {
             "camera": {
@@ -218,12 +202,12 @@ def run_leap():
             "hand_type": "Left",
             "selfie": False,
         },
-        "type": {"type_name": "box", "category": "leap"},
-        "leap_cfg": {"sim": True, "curr_lim": 150, "kP": 100, "kI": 0, "kD": 150},
+        "type": {"type_name": "grasp", "category": "hand2"},
+        "hand_cfg": {"sim": True},
     }
     runner = RealTimeRunner(cfg)
     runner.start()
 
 
 if __name__ == "__main__":
-    run_leap()
+    run_hand2()

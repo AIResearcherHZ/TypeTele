@@ -1,3 +1,8 @@
+ruff check --unsafe-fixes --fix /home/xhz/TypeTele
+ruff format /home/xhz/TypeTele
+
+
+
 # <p align="center">TypeTele (CoRL 2025)</p>
 
 ### <p align="center">Yuhao Lin\*, Yi-Lin Wei\*, Haoran Liao, Mu Lin, Chengyi Xing, Hao Li, <br>Dandan Zhang, Mark Cutkosky, Wei-Shi Zheng</p>
@@ -48,7 +53,7 @@ pip install -r requirements.txt
 To create and save new grasp types to the TypeLibrary:
 
 ```bash
-python leap_1_create_type.py
+python hand2_1_create_type.py
 ```
 
 Follow the command-line interface to:
@@ -57,14 +62,14 @@ Follow the command-line interface to:
 - Save the gesture to file (`save`)
 - Other commands: `reset`, `help`, `quit`
 
-Saved types will be stored in `TypeLibrary/leap/` directory.
+Saved types will be stored in `TypeLibrary/hand2/` directory.
 
 ### 2. Testing Grasp Types
 
 To test and interact with saved grasp types:
 
 ```bash
-python leap_2_test_type.py [type_name]
+python hand2_2_test_type.py [type_name]
 ```
 
 Controls:
@@ -73,18 +78,18 @@ Controls:
 - `0`: Jump to OPEN position
 - `1`: Jump to CLOSE position
 
-If no type name is provided, it defaults to "processed_tape".
+If no type name is provided, it defaults to "grasp".
 
 ### 3. Real-time Teleoperation
 
 For real-time teleoperation with hand tracking:
 
-First, configure your API keys in leap_3_realtime.py:
+First, configure your API keys in hand2_3_realtime.py:
 - LLM API key for type retrieval
 - (Optional) Tencent ASR credentials for voice input
 
 ```bash
-python leap_3_realtime.py
+python hand2_3_realtime.py
 ```
 
 By default, the system uses keyboard input for commands. To enable voice recognition, change the ASR type in the configuration section.
@@ -96,11 +101,9 @@ Controls:
 
 ## Hardware Configuration
 
-### LEAP Hand Communication
+### Hand Model
 
-The DynamixelClient in leap_node.py uses "/dev/ttyUSB0" as the default serial port. For Windows users:
-- Check Device Manager for the COM port
-- Modify the port in leap_node.py accordingly (e.g., "COM1")
+The simulated hand is the 20-DoF wujihand (hand2), loaded from `assets/hand2/right.xml` (MJCF, MuJoCo).
 
 ### Camera Setup
 
@@ -118,7 +121,7 @@ Adjust the camera ID in the configuration according to your setup.
 ```
 TypeTele/
 ├── TypeLibrary/              # Dexterous manipulation type library
-│   └── leap/                 # LEAP Hand specific types
+│   └── hand2/                # hand2 specific types
 ├── asr/                      # Automatic Speech Recognition modules
 │   ├── tencent_asr.py        # Tencent Cloud ASR implementation
 │   └── typing_asr.py         # Keyboard-based ASR alternative
@@ -126,11 +129,12 @@ TypeTele/
 │   ├── Camera.py             # Camera interface
 │   ├── SingleHandDetetor.py  # Hand landmark detection
 │   └── detectFinger.py       # Finger state estimation
-├── leap_hand_utils/          # LEAP Hand utility functions
+├── assets/hand2/             # hand2 MJCF model and meshes
+├── hand2_utils/              # hand2 MuJoCo simulation node
 ├── retrieve/                 # MLLM-based type retrieval
-├── leap_1_create_type.py     # Type creation script
-├── leap_2_test_type.py       # Type testing script
-└── leap_3_realtime.py        # Real-time teleoperation
+├── hand2_1_create_type.py    # Type creation script
+├── hand2_2_test_type.py      # Type testing script
+└── hand2_3_realtime.py       # Real-time teleoperation
 ```
 
 ## Contributing

@@ -9,7 +9,6 @@ colorama
 contourpy
 cycler
 distro
-dynamixel-sdk
 exceptiongroup
 flatbuffers
 fonttools
@@ -25,6 +24,7 @@ loguru
 matplotlib
 mediapipe
 ml_dtypes
+mujoco
 numpy
 openai
 opencv-contrib-python
@@ -39,7 +39,6 @@ pydantic
 pydantic_core
 pynput
 pyparsing
-pyserial
 python-dateutil
 requests
 rich
