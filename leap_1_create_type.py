@@ -1,188 +1,155 @@
 import os
+import time
+
 import numpy as np
 
-from leap_hand_utils.leap_node import LeapNode
+from leap_hand_utils.leap_node import create_leap_node
+from ui import KeyReader, command_panel, console, pose_table
 
-# Hand category for type library organization
 HAND_CATEGORY = "leap"
 
+
 class LeapCreateType:
-    """
-    Command-line interface for recording LEAP Hand gesture types.
-    
-    This class manages the recording of open and close positions for hand gestures
-    and saves them to the TypeLibrary for later use in teleoperation tasks.
-    """
-    
     def __init__(self, cfg):
-        """
-        Initialize the gesture recorder.
-        
-        Args:
-            cfg (dict): Configuration dictionary containing 'leap_cfg' with hardware parameters
-        """
         self.cfg = cfg
         self.leap_node = None
-        self.open_pos = None  # First line (open position)
-        self.close_pos = None  # Second line (close position)
+        self.open_pos = None
+        self.close_pos = None
         self.init_leap()
 
     def init_leap(self):
-        """Initialize hardware node and enable free drag mode."""
-        print("Initializing LEAP Hand...")
-        self.leap_node = LeapNode(self.cfg["leap_cfg"])
+        console.print("[dim]正在初始化 LEAP 灵巧手...[/]")
+        self.leap_node = create_leap_node(self.cfg["leap_cfg"])
         self.leap_node.enable_free_drag_mode()
-        print("LEAP Hand entered free drag mode")
+        console.print("[green]LEAP 灵巧手已进入自由拖拽模式[/]")
 
     def _get_current_leap_pos(self):
-        """Read current 16 joint positions and convert to save format."""
-        current_pos = self.leap_node.read_pos()  # Raw 16-length position
+        current_pos = self.leap_node.read_pos()
         joints = current_pos - 3.14159
         reorder_index = np.array([9, 8, 10, 11, 5, 4, 6, 7, 1, 0, 2, 3, 12, 13, 14, 15])
         inverse_index = np.argsort(reorder_index)
         reordered = np.array(joints)[inverse_index]
         return reordered
 
-    def record_open(self):
-        """Record the open position of the gesture."""
+    def record_next(self):
         pos = self._get_current_leap_pos()
-        self.open_pos = pos
-        print("OPEN position recorded:")
-        print(pos)
+        if self.open_pos is None:
+            self.open_pos = pos
+            console.print(pose_table("1/2 已记录「张开」姿态 (rad)", pos))
+            console.print("[bold]摆好「闭合」姿势后再按一次空格[/]")
+        elif self.close_pos is None:
+            self.close_pos = pos
+            console.print(
+                pose_table("2/2 已记录「闭合」姿态 (rad)", pos, style="magenta")
+            )
+            console.print("[bold]按回车保存，或按 r 重录[/]")
+        else:
+            console.print("[yellow]两个姿态都已录好，按回车保存，或按 r 重录[/]")
 
-    def record_close(self):
-        """Record the close position of the gesture."""
-        pos = self._get_current_leap_pos()
-        self.close_pos = pos
-        print("CLOSE position recorded:")
-        print(pos)
-
-    def save_data(self):
-        """
-        Save recorded gesture data to file.
-        
-        Prompts user for gesture name and saves both open and close positions
-        to TypeLibrary/<HAND_CATEGORY>/<gesture_name>.txt
-        """
+    def save_data(self, keys):
         if self.open_pos is None or self.close_pos is None:
-            print("Error: Please record both OPEN (ro) and CLOSE (rc) positions first")
+            console.print("[yellow]还没录满两个姿态，先按空格记录[/]")
             return
 
-        type_name = input("Enter gesture name: ").strip()
+        keys.pause()
+        try:
+            type_name = input("给这个手势起个名字: ").strip()
+        finally:
+            keys.resume()
         if not type_name:
-            print("Gesture name cannot be empty")
+            console.print("[yellow]名字为空，未保存[/]")
             return
 
-        # Directory structure: TypeLibrary/<HAND_CATEGORY>/
-        base_dir = 'TypeLibrary'
-        save_dir = os.path.join(base_dir, HAND_CATEGORY)
+        save_dir = os.path.join("TypeLibrary", HAND_CATEGORY)
         os.makedirs(save_dir, exist_ok=True)
-        
-        save_path = os.path.join(save_dir, f'{type_name}.txt')
-        
-        # Check if file already exists
+        save_path = os.path.join(save_dir, f"{type_name}.txt")
+
         if os.path.exists(save_path):
-            confirm = input(f"Gesture '{type_name}' already exists. Overwrite? (y/n): ").strip().lower()
-            if confirm != 'y':
-                print("Save cancelled")
+            keys.pause()
+            try:
+                confirm = (
+                    input(f"手势「{type_name}」已存在，是否覆盖？(y/n): ")
+                    .strip()
+                    .lower()
+                )
+            finally:
+                keys.resume()
+            if confirm != "y":
+                console.print("[yellow]已取消保存[/]")
                 return
 
-        # Save as space-separated values, one line per position
-        with open(save_path, 'w') as f:
-            f.write(' '.join(map(str, self.open_pos)) + '\n')
-            f.write(' '.join(map(str, self.close_pos)) + '\n')
+        with open(save_path, "w") as f:
+            f.write(" ".join(map(str, self.open_pos)) + "\n")
+            f.write(" ".join(map(str, self.close_pos)) + "\n")
 
-        print(f"Gesture saved to: {save_path}")
-
-    def reset_positions(self):
-        """Reset all recorded positions."""
+        console.print(f"[green]手势已保存到: {save_path}[/]")
         self.open_pos = None
         self.close_pos = None
-        print("All recordings reset")
+        console.print("[bold]可以继续录下一个手势：摆好「张开」姿势按空格[/]")
+
+    def reset_positions(self):
+        self.open_pos = None
+        self.close_pos = None
+        console.print("[yellow]已清空，重新摆好「张开」姿势按空格[/]")
 
     def print_help(self):
-        """Display help information with available commands."""
-        print("\nAvailable commands:")
-        print("  ro     - Record OPEN position (first line)")
-        print("  rc     - Record CLOSE position (second line)")
-        print("  save   - Save gesture to file")
-        print("  reset  - Reset all recordings")
-        print("  help   - Display this help message")
-        print("  quit   - Exit program")
-        print()
+        console.print(
+            command_panel(
+                "LEAP 手势录制工具",
+                [
+                    ("空格", "记录当前姿态 (第 1 次=张开，第 2 次=闭合)"),
+                    ("回车", "保存手势 (只在起名字时需要打字)"),
+                    ("r", "重录当前手势"),
+                    ("h", "显示本帮助"),
+                    ("q / Esc", "退出"),
+                ],
+                footer="在 MuJoCo 窗口拖拽摆姿势；热键在终端和 MuJoCo 窗口都有效",
+            )
+        )
+        console.print("[bold]摆好「张开」姿势后按空格开始[/]")
 
     def run(self):
-        """
-        Run the command-line interaction loop.
-        
-        Main loop that processes user commands until quit is requested.
-        Handles KeyboardInterrupt gracefully and cleans up resources on exit.
-        """
-        print("\n" + "="*60)
-        print("LEAP Gesture Type Recorder - CLI")
-        print("="*60)
+        console.print()
         self.print_help()
+        try:
+            with KeyReader() as keys:
+                while True:
+                    key = keys.poll()
+                    if key is None:
+                        time.sleep(0.02)
+                        continue
+                    if key == " ":
+                        self.record_next()
+                    elif key in ("\r", "\n", "s"):
+                        self.save_data(keys)
+                    elif key == "r":
+                        self.reset_positions()
+                    elif key == "h":
+                        self.print_help()
+                    elif key in ("q", "\x1b"):
+                        console.print("[dim]正在退出...[/]")
+                        break
+        except KeyboardInterrupt:
+            console.print("\n[yellow]检测到 Ctrl+C，正在退出...[/]")
 
-        while True:
-            try:
-                cmd = input("\nEnter command (type 'help' for options): ").strip().lower()
-
-                if cmd == 'ro':
-                    self.record_open()
-                elif cmd == 'rc':
-                    self.record_close()
-                elif cmd == 'save':
-                    self.save_data()
-                elif cmd == 'reset':
-                    self.reset_positions()
-                elif cmd == 'help':
-                    self.print_help()
-                elif cmd in ['quit', 'exit', 'q']:
-                    print("Exiting...")
-                    break
-                elif cmd == '':
-                    continue
-                else:
-                    print(f"Unknown command: '{cmd}'. Type 'help' for available commands")
-
-            except KeyboardInterrupt:
-                print("\n\nCtrl+C detected, exiting...")
-                break
-            except Exception as e:
-                print(f"Error: {e}")
-
-        # Clean up resources
         self.cleanup()
 
     def cleanup(self):
-        """Clean up hardware resources and disable free drag mode."""
         try:
             if self.leap_node and self.leap_node.free_drag_active:
-                print("Disabling free drag mode...")
                 self.leap_node.disable_free_drag_mode()
-                print("Free drag mode disabled")
+            if self.leap_node:
+                self.leap_node.close()
         except Exception as e:
-            print(f'Failed to disable free drag mode: {e}')
+            console.print(f"[red]清理灵巧手资源失败: {e}[/]")
 
 
 def main():
-    """
-    Main entry point for the LEAP gesture recorder.
-    
-    Initializes hardware configuration and starts the interactive CLI.
-    """
-    cfg = {
-        "leap_cfg": {
-            "curr_lim": 120,
-            "kP": 150,
-            "kI": 0,
-            "kD": 50
-        }
-    }
-    
+    cfg = {"leap_cfg": {"sim": True, "curr_lim": 120, "kP": 150, "kI": 0, "kD": 50}}
+
     recorder = LeapCreateType(cfg)
     recorder.run()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

@@ -5,6 +5,8 @@ import os
 import json
 import difflib
 import re
+from ui import console
+
 
 class Retrieve:
     def __init__(self, api_key, base_url, category: str = "papert"):
@@ -15,8 +17,8 @@ class Retrieve:
         self.running = False
         self.retrieve_thread = None
 
-        self.type_files = [] 
-        self.types = []       
+        self.type_files = []
+        self.types = []
 
         self._result_lock = Lock()
         self.have_new_result = False
@@ -39,9 +41,9 @@ class Retrieve:
                     self.have_new_input = False
                 else:
                     current_input = None
-            
+
             if current_input:
-                print("Start retrieving...")
+                console.print("[dim]开始检索...[/]")
                 type_name = self._retrieve(current_input)
                 with self._result_lock:
                     self.result = type_name
@@ -60,34 +62,42 @@ class Retrieve:
         type_library_path = os.path.join(base_type_library_path, self.category)
 
         if not os.path.isdir(type_library_path):
-            print(f"[Retrieve] Directory {type_library_path} does not exist, falling back to {base_type_library_path}")
+            console.print(
+                f"[yellow]检索: 目录 {type_library_path} 不存在，改用 {base_type_library_path}[/]"
+            )
             type_library_path = base_type_library_path
 
-        json_path = os.path.join(type_library_path, f"{self.category}", "_type_info.json")
+        json_path = os.path.join(
+            type_library_path, f"{self.category}", "_type_info.json"
+        )
 
         loaded_from_json = False
         if os.path.exists(json_path):
             try:
-                with open(json_path, 'r', encoding='utf-8') as f:
+                with open(json_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 if isinstance(data, list):
                     self.types = data
-                    self.type_files = [t.get('id') for t in self.types if 'id' in t]
+                    self.type_files = [t.get("id") for t in self.types if "id" in t]
                     loaded_from_json = True
             except Exception as e:
-                print(f"Failed to read _type_info.json: {e}")
+                console.print(f"[red]读取 _type_info.json 失败: {e}[/]")
 
         if not loaded_from_json:
-            self.type_files = [f[:-4] for f in os.listdir(type_library_path) if f.endswith('.txt')]
+            self.type_files = [
+                f[:-4] for f in os.listdir(type_library_path) if f.endswith(".txt")
+            ]
             self.types = [{"id": name} for name in self.type_files]
-        print(f"Loaded types (category={self.category}): {self.type_files}")
+        console.print(
+            f"[green]已加载手势列表[/] (类别={self.category}): {self.type_files}"
+        )
 
     def _local_score(self, query: str, gesture: dict) -> float:
         q = query.lower().strip()
-        gid = gesture.get('id', '') or ''
-        name = gesture.get('name', '') or ''
-        usage = gesture.get('usage', '') or ''
-        intents = gesture.get('intents', []) or []
+        gid = gesture.get("id", "") or ""
+        name = gesture.get("name", "") or ""
+        usage = gesture.get("usage", "") or ""
+        intents = gesture.get("intents", []) or []
 
         base = difflib.SequenceMatcher(None, q, gid).ratio()
 
@@ -113,7 +123,7 @@ class Retrieve:
             s = self._local_score(query, g)
             if s > best_score:
                 best_score = s
-                best = g.get('id')
+                best = g.get("id")
         return best, best_score
 
     def _retrieve(self, query: str):
@@ -126,8 +136,12 @@ class Retrieve:
 
         brief_lines = []
         for t in self.types:
-            intents = ','.join(t.get('intents', [])[:3]) if isinstance(t.get('intents'), list) else ''
-            brief_lines.append(f"{t.get('id')}: {t.get('pose','')}; intents={intents}")
+            intents = (
+                ",".join(t.get("intents", [])[:3])
+                if isinstance(t.get("intents"), list)
+                else ""
+            )
+            brief_lines.append(f"{t.get('id')}: {t.get('pose', '')}; intents={intents}")
         catalog = "\n".join(brief_lines)
 
         prompt = (
@@ -140,28 +154,31 @@ class Retrieve:
             response = self.client.chat.completions.create(
                 model="deepseek-chat",
                 messages=[
-                    {"role": "system", "content": "You are a concise classifier returning only a gesture id or None."},
+                    {
+                        "role": "system",
+                        "content": "You are a concise classifier returning only a gesture id or None.",
+                    },
                     {"role": "user", "content": prompt},
                 ],
-                stream=False
+                stream=False,
             )
             candidate = response.choices[0].message.content.strip()
         except Exception as e:
-            print(f"LLM retrieval exception: {e}")
+            console.print(f"[red]大模型检索出错: {e}[/]")
             candidate = None
 
         if candidate in self.type_files:
             return candidate
-        
+
         if local_id and score >= 0.55:
             return local_id
         return None
-        
+
     def retrieve(self, query: str):
         with self._input_lock:
             self.input = query
             self.have_new_input = True
-        
+
     def has_new_result(self):
         with self._result_lock:
             return self.have_new_result
@@ -175,5 +192,5 @@ class Retrieve:
                 else:
                     return None
         except Exception as e:
-            print(f"Error getting result: {e}")
+            console.print(f"[red]获取检索结果出错: {e}[/]")
             return None
