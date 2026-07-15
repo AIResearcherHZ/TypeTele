@@ -37,7 +37,7 @@
     <mesh name="r_wrist" content_type="model/stl" file="r_wrist.STL" />
   </asset>
   <worldbody>
-    <body name="r_base_link" gravcomp="1">
+    <body name="r_base_link" gravcomp="1" pos="0.05 0 0.43" quat="0.7071068 0 0.7071068 0">
       <joint name="base_free" type="free" damping="1" />
       <inertial pos="-0.00272850775526 -0.00107303771526 0.0533827160948" mass="0.3013" quat="0.03384030 0.01041875 0.99905755 -0.02510550" diaginertia="2.99905109e-04 2.36568961e-04 1.02188510e-04" />
       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="r_base_link" />
