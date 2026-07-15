@@ -4,20 +4,13 @@ from retrieve.retrieve import Retrieve
 from hand2_utils.hand_node import NUM_JOINTS, create_hand_node
 
 import os
-import time
 import numpy as np
 import cv2
 
 from asr.typing_asr import KeyboardAsrServer
 from ui import console, kv_panel
 
-FINGER_MASKS = {
-    "thumb": np.array([1] * 4 + [0] * 16),
-    "index": np.array([0] * 4 + [1] * 4 + [0] * 12),
-    "middle": np.array([0] * 8 + [1] * 4 + [0] * 8),
-    "ring": np.array([0] * 12 + [1] * 4 + [0] * 4),
-    "pinky": np.array([0] * 16 + [1] * 4),
-}
+FINGERS = ("thumb", "index", "middle", "ring", "pinky")
 
 
 class RealTimeRunner:
@@ -51,7 +44,11 @@ class RealTimeRunner:
             kv_panel(
                 "hand2 实时遥操作",
                 [
-                    ("灵巧手后端", "[bold]仿真 (MuJoCo)[/]", "assets/hand2/scene_right.xml"),
+                    (
+                        "灵巧手后端",
+                        "[bold]仿真 (MuJoCo)[/]",
+                        "assets/hand2/scene_right.xml",
+                    ),
                     ("初始手势", self.curr_type, f"类别 {self.category}"),
                     (
                         "指令输入",
@@ -138,25 +135,20 @@ class RealTimeRunner:
                     if result and result != self.curr_type:
                         self.change_type(result)
 
-                result = self.finger_detector.get()
+                result = self.finger_detector.get(timeout=0.02)
                 if result:
                     ratio, bgr = result
 
-                    type_pos = np.zeros(NUM_JOINTS)
-                    for finger, mask in FINGER_MASKS.items():
-                        r = ratio[finger]
-                        type_pos += (
+                    if ratio is not None:
+                        r = np.repeat([ratio[f] for f in FINGERS], 4)
+                        self.hand_node.set_pos(
                             self.open_pos * (1 - r) + self.close_pos * r
-                        ) * mask
-
-                    self.hand_node.set_pos(type_pos)
+                        )
 
                     if bgr is not None:
                         cv2.imshow("Hand Detection", bgr)
                         if cv2.waitKey(1) & 0xFF == ord("q"):
                             break
-
-                time.sleep(0.01)
 
         except KeyboardInterrupt:
             console.print("[dim]正在停止...[/]")

@@ -1,130 +1,90 @@
-from .Camera import Camera
-from .SingleHandDetetor import SingleHandDetector
+import threading
+
 import cv2
 import numpy as np
-import time
-import threading
-from queue import Queue
+
 from ui import console
+
+from .Camera import Camera
+from .SingleHandDetetor import SingleHandDetector
+
+FINGER_RANGES = (
+    ("thumb", 4, 0.02, 0.09),
+    ("index", 8, 0.09, 0.17),
+    ("middle", 12, 0.09, 0.18),
+    ("ring", 16, 0.07, 0.17),
+    ("pinky", 20, 0.08, 0.14),
+)
 
 
 class FingerDetector:
     def __init__(self, cfg):
-        self.hand_type = cfg.get("hand_type", "Right")
-        self.selfie = cfg.get("selfie", True)
-
-        self.cam = None
-        self.detector = None
         self.cam = Camera(cfg["camera"])
-        self.detector = SingleHandDetector(hand_type=self.hand_type, selfie=False)
+        self.detector = SingleHandDetector(
+            hand_type=cfg.get("hand_type", "Right"), selfie=cfg.get("selfie", True)
+        )
 
-        self.open_mean_angles = None
-        self.closed_mean_angles = None
-        self.angle_range = None
-        self.is_calibrated = False
-
-        self.result_queue = Queue(maxsize=1)
-
+        self._latest = None
+        self._cond = threading.Condition()
         self.running = False
         self.detection_thread = None
 
     def _detection_loop(self):
         while self.running:
+            bgr = self.cam.get_frame()
+            if bgr is None:
+                continue
             try:
-                bgr = self.cam.get_frame()
                 rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
                 _, joint_pos, keypoint_2d, _ = self.detector.detect(rgb=rgb)
-
-                if joint_pos is not None:
-                    bgr = self.detector.draw_skeleton_on_image(
-                        bgr, keypoint_2d, style="default"
-                    )
-
-                    thumb_vec = joint_pos[4] - joint_pos[0]
-                    thumb_vec[0] = thumb_vec[2] = 0
-                    thumb_length = np.linalg.norm(thumb_vec)
-                    index_vec = joint_pos[8] - joint_pos[0]
-                    index_length = np.linalg.norm(index_vec)
-                    middle_vec = joint_pos[12] - joint_pos[0]
-                    middle_length = np.linalg.norm(middle_vec)
-                    ring_vec = joint_pos[16] - joint_pos[0]
-                    ring_length = np.linalg.norm(ring_vec)
-                    pinky_vec = joint_pos[20] - joint_pos[0]
-                    pinky_length = np.linalg.norm(pinky_vec)
-
-                    thumb_ratio = np.clip(
-                        (thumb_length - 0.02) / (0.09 - 0.02), 0.0, 1.0
-                    )
-                    index_ratio = np.clip(
-                        (index_length - 0.09) / (0.17 - 0.09), 0.0, 1.0
-                    )
-                    middle_ratio = np.clip(
-                        (middle_length - 0.09) / (0.18 - 0.09), 0.0, 1.0
-                    )
-                    ring_ratio = np.clip((ring_length - 0.07) / (0.17 - 0.07), 0.0, 1.0)
-                    pinky_ratio = np.clip(
-                        (pinky_length - 0.08) / (0.14 - 0.08), 0.0, 1.0
-                    )
-
-                    finger_ratios = {
-                        "thumb": 1 - thumb_ratio,
-                        "index": 1 - index_ratio,
-                        "middle": 1 - middle_ratio,
-                        "ring": 1 - ring_ratio,
-                        "pinky": 1 - pinky_ratio,
-                    }
-
-                    if not self.result_queue.empty():
-                        try:
-                            self.result_queue.get_nowait()
-                        except:
-                            pass
-
-                    self.result_queue.put((finger_ratios, bgr))
-
-                time.sleep(0.01)
-
             except Exception as e:
-                console.print(f"[red]手部检测循环出错: {e}[/]")
-                time.sleep(0.1)
+                console.print(f"[red]手部检测出错: {e}[/]")
+                continue
+
+            finger_ratios = None
+            if joint_pos is not None:
+                bgr = self.detector.draw_skeleton_on_image(
+                    bgr, keypoint_2d, style="default"
+                )
+                finger_ratios = {}
+                for name, tip, lo, hi in FINGER_RANGES:
+                    vec = joint_pos[tip] - joint_pos[0]
+                    if name == "thumb":
+                        vec[0] = vec[2] = 0
+                    length = np.linalg.norm(vec)
+                    finger_ratios[name] = 1 - np.clip((length - lo) / (hi - lo), 0, 1)
+
+            with self._cond:
+                self._latest = (finger_ratios, bgr)
+                self._cond.notify_all()
 
     def start(self):
         if self.running:
-            console.print("[yellow]手部检测已经在运行了！[/]")
-            return False
-
-        if self.cam is None:
-            self.cam = Camera()
+            return
         self.cam.start()
-
-        if self.detector is None:
-            self.detector = SingleHandDetector(
-                hand_type=self.hand_type, selfie=self.selfie
-            )
-
         self.running = True
         self.detection_thread = threading.Thread(
             target=self._detection_loop, daemon=True
         )
         self.detection_thread.start()
-
         console.print("[green]实时手部检测已启动！[/]")
-        return True
 
     def stop(self):
+        if not self.running:
+            return
         self.running = False
+        self.cam.stop()
         if self.detection_thread and self.detection_thread.is_alive():
-            self.detection_thread.join(timeout=1.0)
+            self.detection_thread.join(timeout=3.0)
+        self.detector.close()
         console.print("[dim]实时手部检测已停止！[/]")
 
-    def get(self):
-        try:
-            return self.result_queue.get_nowait()
-        except:
-            return None
+    def get(self, timeout=0.0):
+        with self._cond:
+            if self._latest is None and timeout > 0:
+                self._cond.wait(timeout)
+            result, self._latest = self._latest, None
+        return result
 
     def is_running(self):
         return self.running
-
-    def __del__(self):
-        self.stop()

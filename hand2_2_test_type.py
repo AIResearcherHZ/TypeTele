@@ -1,6 +1,5 @@
 import os
 import sys
-import time
 
 import numpy as np
 from scipy.spatial.transform import Rotation, Slerp
@@ -78,9 +77,7 @@ class Hand2TypePlayer:
             self.close_eef = ce
             self._eef_slerp = Slerp(
                 [0.0, 1.0],
-                Rotation.from_quat(
-                    [oe[[4, 5, 6, 3]], ce[[4, 5, 6, 3]]]
-                ),
+                Rotation.from_quat([oe[[4, 5, 6, 3]], ce[[4, 5, 6, 3]]]),
             )
             console.print("[green]手势加载成功 (含 EEF 基座位姿)[/]")
             console.print(pose_table("「张开」姿态 (rad)", o))
@@ -153,9 +150,8 @@ class Hand2TypePlayer:
         try:
             with KeyReader() as keys:
                 while True:
-                    key = keys.poll()
+                    key = keys.poll(timeout=0.2)
                     if key is None:
-                        time.sleep(0.02)
                         continue
                     if key == "a":
                         self.decrease()

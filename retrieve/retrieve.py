@@ -1,6 +1,5 @@
 from openai import OpenAI
-from threading import Thread, Lock
-import time
+from threading import Condition, Thread, Lock
 import os
 import json
 import difflib
@@ -24,36 +23,37 @@ class Retrieve:
         self.have_new_result = False
         self.result = ""
 
-        self._input_lock = Lock()
+        self._input_cond = Condition()
         self.have_new_input = False
         self.input = ""
 
     def start(self):
         self.running = True
-        self.retrieve_thread = Thread(target=self.spin)
+        self.retrieve_thread = Thread(target=self.spin, daemon=True)
         self.retrieve_thread.start()
 
     def spin(self):
-        while self.running:
-            with self._input_lock:
-                if self.have_new_input:
-                    current_input = self.input
-                    self.have_new_input = False
-                else:
-                    current_input = None
+        while True:
+            with self._input_cond:
+                while self.running and not self.have_new_input:
+                    self._input_cond.wait()
+                if not self.running:
+                    return
+                current_input = self.input
+                self.have_new_input = False
 
-            if current_input:
-                console.print("[dim]开始检索...[/]")
-                type_name = self._retrieve(current_input)
-                with self._result_lock:
-                    self.result = type_name
-                    self.have_new_result = True
-            time.sleep(1)
+            console.print("[dim]开始检索...[/]")
+            type_name = self._retrieve(current_input)
+            with self._result_lock:
+                self.result = type_name
+                self.have_new_result = True
 
     def stop(self):
-        self.running = False
+        with self._input_cond:
+            self.running = False
+            self._input_cond.notify_all()
         if self.retrieve_thread is not None:
-            self.retrieve_thread.join()
+            self.retrieve_thread.join(timeout=2.0)
             self.retrieve_thread = None
 
     def load_type_library(self):
@@ -173,9 +173,10 @@ class Retrieve:
         return None
 
     def retrieve(self, query: str):
-        with self._input_lock:
+        with self._input_cond:
             self.input = query
             self.have_new_input = True
+            self._input_cond.notify_all()
 
     def has_new_result(self):
         with self._result_lock:

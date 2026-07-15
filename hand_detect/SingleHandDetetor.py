@@ -60,6 +60,11 @@ class SingleHandDetector:
         inverse_hand_dict = {"Right": "Left", "Left": "Right"}
         self.detected_hand_type = hand_type if selfie else inverse_hand_dict[hand_type]
 
+    def close(self):
+        if self.hand_detector is not None:
+            self.hand_detector.close()
+            self.hand_detector = None
+
     @staticmethod
     def draw_skeleton_on_image(image, keypoint_2d, style="white"):
         h, w = image.shape[:2]

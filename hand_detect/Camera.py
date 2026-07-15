@@ -1,5 +1,4 @@
 import cv2
-import time
 import threading
 from queue import Queue, Empty
 from ui import console
@@ -42,7 +41,7 @@ class Camera:
                         pass
                 self.frame_queue.put(frame)
             else:
-                time.sleep(0.01)
+                self.stop_event.wait(0.01)
 
         if self.cap:
             self.cap.release()
@@ -81,7 +80,6 @@ def demo_camera():
                 cv2.imshow("Camera Feed", bgr)
             else:
                 console.print("[yellow]没有采集到画面[/]")
-                time.sleep(0.1)
 
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break

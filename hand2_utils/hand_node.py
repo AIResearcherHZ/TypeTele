@@ -41,16 +41,12 @@ class Hand2NodeSim:
         self._qpos_adr = self.model.jnt_qposadr[joint_ids]
         self._dof_adr = self.model.jnt_dofadr[joint_ids]
 
-        base_jid = mujoco.mj_name2id(
-            self.model, mujoco.mjtObj.mjOBJ_JOINT, "base_free"
-        )
+        base_jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "base_free")
         if base_jid < 0:
             raise RuntimeError("hand2 模型缺少浮动基座关节 base_free")
         self._base_qadr = self.model.jnt_qposadr[base_jid]
         self._base_dadr = self.model.jnt_dofadr[base_jid]
-        self._eef_pose = self.model.qpos0[
-            self._base_qadr : self._base_qadr + 7
-        ].copy()
+        self._eef_pose = self.model.qpos0[self._base_qadr : self._base_qadr + 7].copy()
 
         init_pos = cfg.get("init_pos", None)
         if init_pos is not None:
@@ -72,15 +68,19 @@ class Hand2NodeSim:
         self._viewer_threads = [
             t for t in threading.enumerate() if t not in threads_before
         ]
-        self._running = True
+        self._stop = threading.Event()
         self._sim_thread = threading.Thread(target=self._sim_loop, daemon=True)
         self._sim_thread.start()
         atexit.register(self.close)
-        console.print("[green]MuJoCo 仿真已启动[/] (hand2, assets/hand2/scene_right.xml)")
+        console.print(
+            "[green]MuJoCo 仿真已启动[/] (hand2, assets/hand2/scene_right.xml)"
+        )
 
     def _sim_loop(self):
         timestep = self.model.opt.timestep
-        while self._running:
+        sync_every = max(1, round(1.0 / 60.0 / timestep))
+        step_count = 0
+        while not self._stop.is_set():
             step_start = time.perf_counter()
 
             if self.free_drag_active:
@@ -96,15 +96,17 @@ class Hand2NodeSim:
 
             mujoco.mj_step(self.model, self.data)
 
-            if not self._viewer.is_running():
-                console.print("[yellow]MuJoCo 窗口已关闭，程序自动退出[/]")
-                signal.raise_signal(signal.SIGINT)
-                break
-            self._viewer.sync()
+            step_count += 1
+            if step_count % sync_every == 0:
+                if not self._viewer.is_running():
+                    console.print("[yellow]MuJoCo 窗口已关闭，程序自动退出[/]")
+                    signal.raise_signal(signal.SIGINT)
+                    break
+                self._viewer.sync()
 
             elapsed = time.perf_counter() - step_start
             if elapsed < timestep:
-                time.sleep(timestep - elapsed)
+                self._stop.wait(timestep - elapsed)
 
     def set_pos(self, pose):
         self.prev_pos = self.curr_pos
@@ -116,7 +118,9 @@ class Hand2NodeSim:
     def set_eef(self, pose):
         pose = np.asarray(pose, dtype=float)
         if pose.shape != (7,):
-            raise ValueError(f"EEF 位姿应为 7 维 [x y z qw qx qy qz]，实际 {pose.shape}")
+            raise ValueError(
+                f"EEF 位姿应为 7 维 [x y z qw qx qy qz]，实际 {pose.shape}"
+            )
         self._eef_pose = pose
 
     def read_pos(self):
@@ -143,9 +147,9 @@ class Hand2NodeSim:
         self.curr_pos = self.read_pos()
 
     def close(self):
-        if not self._running:
+        if self._stop.is_set():
             return
-        self._running = False
+        self._stop.set()
         if self._sim_thread.is_alive():
             self._sim_thread.join(timeout=2.0)
         self._viewer.close()

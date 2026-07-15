@@ -3,7 +3,7 @@ import json
 import os
 import threading
 import time
-from queue import Queue
+from queue import Empty, Queue
 from collections import deque
 
 import numpy as np
@@ -40,6 +40,8 @@ class AsrServer:
         self.MAX_SILENCE_DURATION = cfg["vad"]["max_silence_duration"]
 
         self.audio_queue = Queue()
+        self._stop = threading.Event()
+        self._stop.set()
         self.is_recording = False
         self.is_running = False
         self.current_recording = []
@@ -124,7 +126,7 @@ class AsrServer:
                 dtype=np.float32,
             ):
                 console.print("[green]麦克风就绪，开始采集音频...[/]")
-                time.sleep(TEST_DURATION)
+                threading.Event().wait(TEST_DURATION)
 
         except sd.PortAudioError as e:
             console.print(f"[red]无法打开麦克风: {e}[/]")
@@ -295,7 +297,8 @@ class AsrServer:
                 callback=self.audio_callback,
             ):
                 while self.is_recording:
-                    time.sleep(0.1)
+                    if self._stop.wait(0.1):
+                        break
         except Exception as e:
             console.print(f"[red]录音出错: {e}[/]")
 
@@ -352,34 +355,33 @@ class AsrServer:
     def _process_audio(self):
         while self.is_running:
             try:
-                if not self.audio_queue.empty():
-                    audio_data = self.audio_queue.get(timeout=0.5)
+                audio_data = self.audio_queue.get(timeout=0.5)
+            except Empty:
+                continue
 
+            try:
+                if self.verbose:
+                    console.print("[dim]正在调用腾讯云接口识别...[/]")
+                result = self._recognize_audio_data(audio_data)
+                if result.strip():
                     if self.verbose:
-                        console.print("[dim]正在调用腾讯云接口识别...[/]")
-                    result = self._recognize_audio_data(audio_data)
-                    if result.strip():
-                        if self.verbose:
-                            console.print(f"[bold green]识别结果:[/] {result}")
+                        console.print(f"[bold green]识别结果:[/] {result}")
 
-                        with self._result_lock:
-                            if not self.result_queue.empty():
-                                try:
-                                    self.result_queue.get_nowait()
-                                except:
-                                    pass
+                    with self._result_lock:
+                        if not self.result_queue.empty():
+                            try:
+                                self.result_queue.get_nowait()
+                            except Empty:
+                                pass
 
-                            self.result_queue.put(result)
-                            self.have_new_result = True
-                    else:
-                        if self.verbose:
-                            console.print("[yellow]接口返回结果为空[/]")
+                        self.result_queue.put(result)
+                        self.have_new_result = True
                 else:
-                    time.sleep(0.1)
+                    if self.verbose:
+                        console.print("[yellow]接口返回结果为空[/]")
             except Exception as e:
                 if self.is_running:
                     console.print(f"[red]处理音频出错: {e}[/]")
-                time.sleep(0.1)
 
         console.print("[dim]音频处理线程已结束[/]")
 
@@ -404,6 +406,7 @@ class AsrServer:
         console.print("[dim]连续录音模式: 有声开始，静音结束[/]")
         console.print("[dim]避免句子被切碎，保持语句完整[/]")
 
+        self._stop.clear()
         self.is_recording = True
         self.is_running = True
 
@@ -418,6 +421,7 @@ class AsrServer:
 
     def stop(self):
         console.print("[dim]正在停止录音和处理线程...[/]")
+        self._stop.set()
         self.is_recording = False
         self.is_running = False
 
@@ -434,12 +438,12 @@ class AsrServer:
     def get(self):
         try:
             with self._result_lock:
-                if self.has_new_result:
+                if self.have_new_result:
                     result = self.result_queue.get_nowait()
                     self.have_new_result = False
                     return result
                 return None
-        except:
+        except Empty:
             return None
 
     def has_new_result(self):
@@ -481,13 +485,12 @@ def main():
         console.print("[bold]实时语音识别运行中[/]")
         console.print("[dim]按 Ctrl+C 退出[/]")
 
-        while True:
+        idle = threading.Event()
+        while not idle.wait(0.1):
             if asr.has_new_result():
                 result = asr.get()
                 if result:
                     console.print(f"[bold green]语音识别:[/] {result}")
-
-            time.sleep(0.1)
 
     except KeyboardInterrupt:
         console.print("\n[yellow]程序被用户中断[/]")

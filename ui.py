@@ -1,3 +1,4 @@
+import os
 import select
 import sys
 import termios
@@ -14,6 +15,9 @@ console = Console()
 
 VIEWER_KEYS = deque()
 
+_WAKE_R, _WAKE_W = os.pipe()
+os.set_blocking(_WAKE_W, False)
+
 GLFW_KEY_ESCAPE = 256
 GLFW_KEY_ENTER = 257
 GLFW_KEY_KP_ENTER = 335
@@ -26,6 +30,12 @@ def viewer_key_callback(keycode):
         VIEWER_KEYS.append("\n")
     elif 32 <= keycode <= 126:
         VIEWER_KEYS.append(chr(keycode).lower())
+    else:
+        return
+    try:
+        os.write(_WAKE_W, b"\0")
+    except BlockingIOError:
+        pass
 
 
 class KeyReader:
@@ -53,16 +63,21 @@ class KeyReader:
         if self.enabled:
             tty.setcbreak(sys.stdin.fileno())
 
-    def poll(self):
+    def poll(self, timeout=0.0):
         if VIEWER_KEYS:
             return VIEWER_KEYS.popleft()
-        if not self.enabled:
-            return None
-        ready, _, _ = select.select([sys.stdin], [], [], 0.0)
-        if not ready:
-            return None
-        ch = sys.stdin.read(1)
-        return ch.lower() if ch else None
+        fds = [_WAKE_R]
+        if self.enabled:
+            fds.append(sys.stdin)
+        ready, _, _ = select.select(fds, [], [], timeout)
+        if _WAKE_R in ready:
+            os.read(_WAKE_R, 64)
+        if VIEWER_KEYS:
+            return VIEWER_KEYS.popleft()
+        if self.enabled and sys.stdin in ready:
+            ch = sys.stdin.read(1)
+            return ch.lower() if ch else None
+        return None
 
 
 FINGER_NAMES = ("拇指", "食指", "中指", "无名指", "小指")

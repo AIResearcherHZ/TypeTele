@@ -1,7 +1,9 @@
-import time
+import sys
 import threading
-from queue import Queue, Empty
+from queue import Empty, Full, Queue
+
 from pynput import keyboard
+
 from ui import console
 
 
@@ -41,7 +43,7 @@ class KeyboardAsrServer:
         if char is not None:
             try:
                 self.pynput_char_queue.put_nowait(char)
-            except Empty:
+            except Full:
                 pass
 
     def _input_loop(self):
@@ -53,46 +55,42 @@ class KeyboardAsrServer:
         self.keyboard_listener.start()
 
         while self.is_running:
-            char = None
             try:
-                char = self.pynput_char_queue.get_nowait()
+                char = self.pynput_char_queue.get(timeout=0.2)
             except Empty:
-                pass
+                continue
 
-            if char is not None:
-                if char == "\n":
-                    if self.input_buffer.strip():
-                        text = self.input_buffer.strip()
-                        self.input_buffer = ""
+            if char == "\n":
+                if self.input_buffer.strip():
+                    text = self.input_buffer.strip()
+                    self.input_buffer = ""
 
-                        if text.lower() in ["quit", "exit"]:
-                            console.print(f"\n[yellow]检测到退出指令: {text}[/]")
-                            self.is_running = False
-                            break
+                    if text.lower() in ["quit", "exit"]:
+                        console.print(f"\n[yellow]检测到退出指令: {text}[/]")
+                        self.is_running = False
+                        break
 
-                        self._put_result(text)
-                        console.print(f"\n[green]指令已发送: {text}[/]")
-                        console.print("请输入下一条指令: ", end="")
-                    else:
-                        console.print("\n请继续输入: ", end="")
-
-                elif char == "\x7f":
-                    if self.input_buffer:
-                        self.input_buffer = self.input_buffer[:-1]
-                        sys.stdout.write("\b \b")
-                        sys.stdout.flush()
-
-                elif char == "\x03":
-                    console.print("\n[yellow]收到 Ctrl+C，正在退出...[/]")
-                    self.is_running = False
-                    break
-
+                    self._put_result(text)
+                    console.print(f"\n[green]指令已发送: {text}[/]")
+                    console.print("请输入下一条指令: ", end="")
                 else:
-                    self.input_buffer += char
-                    sys.stdout.write(char)
+                    console.print("\n请继续输入: ", end="")
+
+            elif char == "\x7f":
+                if self.input_buffer:
+                    self.input_buffer = self.input_buffer[:-1]
+                    sys.stdout.write("\b \b")
                     sys.stdout.flush()
 
-            time.sleep(0.01)
+            elif char == "\x03":
+                console.print("\n[yellow]收到 Ctrl+C，正在退出...[/]")
+                self.is_running = False
+                break
+
+            else:
+                self.input_buffer += char
+                sys.stdout.write(char)
+                sys.stdout.flush()
 
         if self.keyboard_listener and self.keyboard_listener.is_alive():
             self.keyboard_listener.stop()
@@ -102,7 +100,7 @@ class KeyboardAsrServer:
             if not self.result_queue.empty():
                 try:
                     self.result_queue.get_nowait()
-                except:
+                except Empty:
                     pass
 
             self.result_queue.put(text)
@@ -144,7 +142,7 @@ class KeyboardAsrServer:
                     self.have_new_result = False
                     return result
                 return None
-        except:
+        except Empty:
             return None
 
     def has_new_result(self):
@@ -153,6 +151,3 @@ class KeyboardAsrServer:
 
     def is_running_status(self):
         return self.is_running
-
-    def __del__(self):
-        self.stop()
