@@ -1,5 +1,6 @@
 import atexit
 import os
+import signal
 import threading
 import time
 
@@ -13,7 +14,7 @@ XML_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "assets",
     "hand2",
-    "right.xml",
+    "scene_right.xml",
 )
 NUM_JOINTS = 20
 
@@ -75,7 +76,7 @@ class Hand2NodeSim:
         self._sim_thread = threading.Thread(target=self._sim_loop, daemon=True)
         self._sim_thread.start()
         atexit.register(self.close)
-        console.print("[green]MuJoCo 仿真已启动[/] (hand2, assets/hand2/right.xml)")
+        console.print("[green]MuJoCo 仿真已启动[/] (hand2, assets/hand2/scene_right.xml)")
 
     def _sim_loop(self):
         timestep = self.model.opt.timestep
@@ -95,8 +96,11 @@ class Hand2NodeSim:
 
             mujoco.mj_step(self.model, self.data)
 
-            if self._viewer.is_running():
-                self._viewer.sync()
+            if not self._viewer.is_running():
+                console.print("[yellow]MuJoCo 窗口已关闭，程序自动退出[/]")
+                signal.raise_signal(signal.SIGINT)
+                break
+            self._viewer.sync()
 
             elapsed = time.perf_counter() - step_start
             if elapsed < timestep:

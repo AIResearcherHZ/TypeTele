@@ -51,7 +51,7 @@ class RealTimeRunner:
             kv_panel(
                 "hand2 实时遥操作",
                 [
-                    ("灵巧手后端", "[bold]仿真 (MuJoCo)[/]", "assets/hand2/right.xml"),
+                    ("灵巧手后端", "[bold]仿真 (MuJoCo)[/]", "assets/hand2/scene_right.xml"),
                     ("初始手势", self.curr_type, f"类别 {self.category}"),
                     (
                         "指令输入",
